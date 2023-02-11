@@ -17,8 +17,7 @@ import { authenticate } from '../app';
 async function authenticateMiddleware(req: Request, res: Response, next: NextFunction) {
   const cfRequest = convertExpressRequestToCloudFrontRequest(req);
 
-  //const authResult = await authenticate(cfRequest);
-  const authResult = { authenticated: true, response: null };
+  const authResult = await authenticate(cfRequest);
   if (authResult.authenticated) {
     next();
   } else {
@@ -36,7 +35,6 @@ app.use(express.static(publicDir));
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
-
 
 
 
