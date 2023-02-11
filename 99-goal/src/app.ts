@@ -28,3 +28,9 @@ export const lambdaHandler = async (event: APIGatewayProxyEvent): Promise<APIGat
         };
     }
 };
+
+async function authenticate() {
+    return { authenticated: true, response: null };
+}
+
+export { authenticate };
