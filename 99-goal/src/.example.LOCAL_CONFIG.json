@@ -1,0 +1,15 @@
+{
+  "client_id": "$CLIENT_ID_FROM_IDP",
+  "client_secret": "$CLIENT_SECRET_FROM_IDP",
+  "scope": "openid email",
+  "response_type": "code",
+  "grant_type": "authorization_code",
+  "CALLBACK_BASE_URL": "https://$CLOUDFRONT_DOMAIN",
+  "CALLBACK_PATH": "/_callback",
+  "DISTRIBUTION": "amazon-oai",
+  "PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n",
+  "PUBLIC_KEY": "-----BEGIN RSA PUBLIC KEY-----\n...\n-----END RSA PUBLIC KEY-----\n",
+  "DISCOVERY_DOCUMENT_URL": "https://$IDP_DOMAIN/.well-known/openid-configuration",
+  "SESSION_DURATION": 3600,
+  "IDP_BASE_URL": "https://$IDP_DOMAIN"
+}
