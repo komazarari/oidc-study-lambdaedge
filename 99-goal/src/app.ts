@@ -1,4 +1,5 @@
 import { CloudFrontRequest, CloudFrontRequestResult, CloudFrontHeaders } from 'aws-lambda';
+import QueryString from 'querystring';
 import { assert } from 'console';
 
 export interface AuthenticationResult {
@@ -23,7 +24,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
     return handleCallback(request);
   }
 
-  const authTokenCookieValue = 'dummyToken';
+  const authTokenCookieValue = null;
   if (!authTokenCookieValue) {
     return { authenticated: false, response: oidcRedirectResponse(request) };
   }
@@ -47,7 +48,7 @@ async function handleCallback(request: CloudFrontRequest): Promise<Authenticatio
     response: {
       status: '200',
       statusDescription: 'OK',
-      body: 'ToDo: redirect',
+      body: 'ToDo',
     }
   };
 }
@@ -75,18 +76,26 @@ function internalServerErrorResponse(): CloudFrontRequestResult {
 }
 
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResult {
-  return {
-    status: '200',
-    statusDescription: 'OK',
-    body: 'ToDo: redirect',
+  const authRequest = {
+    client_id: process.env.CLIENT_ID,
+    response_type: 'code',
+    scope: 'openid email',
+    redirect_uri: 'http://localhost:3000/_callback',
+    state: request.uri
   }
-  /* return {
+
+  const response = {
     status: '302',
     statusDescription: 'Found',
+    body: 'Redirecting...',
     headers: {
-      location: [{ key: 'Location', value: redirectUrl }],
-    },
-  }; */
+      location: [{
+        key: 'Location',
+        value: `https://accounts.google.com/o/oauth2/v2/auth?${QueryString.stringify(authRequest)}`
+      }],
+    }
+  };
+  return response;
 }
 
 
