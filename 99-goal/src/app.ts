@@ -40,7 +40,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
   const queryString = QueryString.parse(querystring);
 
   if (request.uri.startsWith(global.config.CALLBACK_PATH)) {
-    return handleCallback(request, queryString);
+    return handleCallback(request, queryString, headers);
   }
 
   const authTokenCookieValue = getCookieValue(headers, 'TOKEN');
@@ -48,16 +48,19 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
     return { authenticated: false, response: oidcRedirectResponse(request) };
   }
 
-  const [err, verifyOk] = await verifyToken(authTokenCookieValue);
-  if (err) {
-    return jwtErrorResult(err, request);
+  const verifyTokenResult = await verifyJwt(authTokenCookieValue, global.config.PUBLIC_KEY, { algorithm: 'RS256' });
+  if (verifyTokenResult instanceof Error) {
+    return jwtErrorResult(verifyTokenResult, request);
   }
 
-  assert(verifyOk);
   return { authenticated: true, response: null };
 }
 
-async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
+async function handleCallback(
+  request: CloudFrontRequest,
+  queryString: ParsedUrlQuery,
+  headers: CloudFrontHeaders,
+): Promise<AuthenticationResult> {
   assert(global.config !== null);
   assert(global.discoveryDocumnet !== null);
   assert(global.jwks !== null);
@@ -91,7 +94,7 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
       const decoded = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
       // ToDo validate NONCE
       // if (!valid) return { authenticated: false, response: unauthorizedResponce('Invalid NONCE', 'Nonce is not valid', '') };
-      return { authenticated: false, response: originalPathRedirectResponse(request, queryString) };
+      return { authenticated: false, response: originalPathRedirectResponse(queryString, idToken.decoded, headers) };
     } catch (err: unknown) {
       if (!err || !(err instanceof Error) || err.name === undefined) {
         console.error('verifyJwt failed with unknown error');
@@ -120,11 +123,6 @@ function jwtErrorResult(err: Error, request: CloudFrontRequest): AuthenticationR
       console.error('Unknown JWT error', err);
       return { authenticated: false, response: unauthorizedResponse('Unknown JWT error', err.message, '') };
   }
-}
-
-async function verifyToken(authToken: string): Promise<[Error | null, boolean]> {
-  console.log('ToDo: verifyToken');
-  return [null, true];
 }
 
 // --------------------
@@ -237,9 +235,11 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultRespo
 }
 
 function originalPathRedirectResponse(
-  request: CloudFrontRequest,
   queryString: ParsedUrlQuery,
+  tokenSubject: string,
+  headers: CloudFrontHeaders,
 ): CloudFrontResultResponse {
+  assert(global.config !== null);
   const response: CloudFrontResultResponse = {
     status: '302',
     statusDescription: 'Found',
@@ -254,11 +254,20 @@ function originalPathRedirectResponse(
       'set-cookie': [
         {
           key: 'Set-Cookie',
-          value: Cookie.serialize('TOKEN', 'dummy', {
-            httpOnly: true,
-            path: '/',
-            maxAge: 60,
-          }),
+          value: Cookie.serialize(
+            'TOKEN',
+            JsonWebToken.sign({}, global.config.PRIVATE_KEY.trim(), {
+              audience: headers.host[0].value,
+              subject: tokenSubject,
+              expiresIn: global.config.SESSION_DURATION,
+              algorithm: 'RS256',
+            }),
+            {
+              httpOnly: true,
+              path: '/',
+              maxAge: 60,
+            },
+          ),
         },
       ],
     },
