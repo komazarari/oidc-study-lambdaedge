@@ -48,11 +48,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 
   const [err, verifyOk] = await verifyToken(authTokenCookieValue);
   if (err) {
-    switch (err.name) {
-      default:
-        // ToDo
-        return { authenticated: false, response: internalServerErrorResponse() };
-    }
+    return jwtErrorResult(err, request);
   }
 
   assert(verifyOk);
@@ -62,6 +58,16 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
   assert(global.config !== null && global.discoveryDocumnet !== null && global.jwks.keys !== null);
   const config = global.config;
+
+  if (queryString.error) {
+    const e = typeof queryString.error === 'string' ? queryString.error : queryString.error.toString();
+    return { authenticated: false, response: unauthorizedResponse(e, '', '') };
+  }
+  if (!queryString.code) {
+    return { authenticated: false, response: unauthorizedResponse('No Code Found', '', '') };
+  }
+
+  // ToDo separate function
   try {
     const tokenRequest: TokenRequest = {
       client_id: config.client_id,
@@ -80,26 +86,35 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
     try {
       const decoded = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
       // ToDo validate NONCE
+      // if (!valid) return { authenticated: false, response: unauthorizedResponce('Invalid NONCE', 'Nonce is not valid', '') };
       return { authenticated: false, response: originalPathRedirectResponse(request, queryString) };
     } catch (err: unknown) {
       if (!err || !(err instanceof Error) || err.name === undefined) {
         console.error('verifyJwt failed with unknown error');
-        return { authenticated: false, response: internalServerErrorResponse() };
+        return {
+          authenticated: false,
+          response: unauthorizedResponse('Unknown JWT', `User ${idToken.decoded.payload.email || 'unknown'}`, ''),
+        };
       }
-      switch (err.name) {
-        case 'TokenExpiredError':
-          console.log('token expired', err);
-          return { authenticated: false, response: oidcRedirectResponse(request) };
-        //case: 'JsonWebTokenError':
-        // ToDo
-        default:
-          console.error('Unknown JWT error', err);
-          return { authenticated: false, response: internalServerErrorResponse() }; // ToDo
-      }
+      return jwtErrorResult(err, request);
     }
   } catch (err) {
     console.error(err);
     return { authenticated: false, response: internalServerErrorResponse() };
+  }
+}
+
+function jwtErrorResult(err: Error, request: CloudFrontRequest): AuthenticationResult {
+  switch (err.name) {
+    case 'TokenExpiredError':
+      console.log('token expired', err);
+      return { authenticated: false, response: oidcRedirectResponse(request) };
+    case 'JsonWebTokenError':
+      console.log('JWT error', err);
+      return { authenticated: false, response: unauthorizedResponse('JsonWebTokenError', err.message, '') };
+    default:
+      console.error('Unknown JWT error', err);
+      return { authenticated: false, response: unauthorizedResponse('Unknown JWT error', err.message, '') };
   }
 }
 
@@ -147,15 +162,40 @@ async function setJwks(): Promise<void> {
 // --------------------
 // response functions
 // --------------------
-function internalServerErrorResponse(): CloudFrontRequestResult {
+function internalServerErrorResponse(): CloudFrontResultResponse {
   return {
     status: '500',
     statusDescription: 'Internal Server Error',
     body: 'Internal Server Error',
+    headers: {
+      'set-cookie': [
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('TOKEN', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('NONCE', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('CODE_VERIFIER', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+      ],
+    },
   };
 }
 
-function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResult {
+function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultResponse {
   assert(global.config !== null && global.discoveryDocumnet !== null);
   const config = global.config;
   const authRequest: AuthRequest = {
@@ -177,7 +217,16 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResu
           value: `${global.discoveryDocumnet.authorization_endpoint}?${QueryString.stringify(authRequest)}`,
         },
       ],
-      // ToDo set cookie TOKEN empty
+      'set-cookie': [
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('TOKEN', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+        // ToDo NONCE
+      ],
     },
   };
   return response;
@@ -211,6 +260,47 @@ function originalPathRedirectResponse(
     },
   };
   return response;
+}
+
+function unauthorizedResponse(error: string, errorDescription: string, errorUri: string): CloudFrontResultResponse {
+  const body = `<!DOCTYPE html>
+  <html>
+  <head><title>Unauthorized</title></head>
+  <body>
+  <h1>Unauthorized - ${error}</h1>
+  <p>${errorDescription}</p><p>${errorUri}</p>
+  </body>
+  </html>`;
+  return {
+    status: '401',
+    statusDescription: 'Unauthorized',
+    body,
+    headers: {
+      'set-cookie': [
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('TOKEN', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('NONCE', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('CODE_VERIFIER', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
+        },
+      ],
+    },
+  };
 }
 
 // --------------------

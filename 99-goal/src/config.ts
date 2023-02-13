@@ -6,7 +6,7 @@ const secretsManagerClient = new SecretsManagerClient({ region: 'us-east-1' });
 import fs from 'fs';
 
 export interface AuthRequest {
-  [key: string]: string | undefined
+  [key: string]: string | undefined;
 
   client_id: string;
   response_type: string;
@@ -19,7 +19,7 @@ export interface AuthRequest {
 }
 
 export interface TokenRequest {
-  [key: string]: string | undefined
+  [key: string]: string | undefined;
 
   client_id: string;
   client_secret: string;
