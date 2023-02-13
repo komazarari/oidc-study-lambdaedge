@@ -18,7 +18,7 @@ const global = {
   config: null as Config | null,
   discoveryDocumnet: null as DiscoveryDocument | null,
   jwks: {
-    keys: null as (({ kid: string } & JWK)[]) | null,
+    keys: null as ({ kid: string } & JWK)[] | null,
   },
 };
 
@@ -171,17 +171,22 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResu
     statusDescription: 'Found',
     body: 'Redirecting...',
     headers: {
-      location: [{
-        key: 'Location',
-        value: `${global.discoveryDocumnet.authorization_endpoint}?${QueryString.stringify(authRequest)}`,
-      }],
+      location: [
+        {
+          key: 'Location',
+          value: `${global.discoveryDocumnet.authorization_endpoint}?${QueryString.stringify(authRequest)}`,
+        },
+      ],
       // ToDo set cookie TOKEN empty
-    }
+    },
   };
   return response;
 }
 
-function originalPathRedirectResponse(request: CloudFrontRequest, queryString: ParsedUrlQuery): CloudFrontResultResponse {
+function originalPathRedirectResponse(
+  request: CloudFrontRequest,
+  queryString: ParsedUrlQuery,
+): CloudFrontResultResponse {
   const response: CloudFrontResultResponse = {
     status: '302',
     statusDescription: 'Found',
@@ -191,21 +196,19 @@ function originalPathRedirectResponse(request: CloudFrontRequest, queryString: P
         {
           key: 'Location',
           value: queryString.state ? queryString.state.toString() : '/',
-        }
+        },
       ],
       'set-cookie': [
         {
           key: 'Set-Cookie',
-          value: Cookie.serialize('TOKEN',
-            'dummy',
-            {
-              httpOnly: true,
-              path: '/',
-              maxAge: 60,
-            })
-        }
-      ]
-    }
+          value: Cookie.serialize('TOKEN', 'dummy', {
+            httpOnly: true,
+            path: '/',
+            maxAge: 60,
+          }),
+        },
+      ],
+    },
   };
   return response;
 }
@@ -213,7 +216,8 @@ function originalPathRedirectResponse(request: CloudFrontRequest, queryString: P
 // --------------------
 // utils
 // --------------------
-async function verifyJwt(token: string, pem: any, options: any): Promise<JwtPayload | Error> { // ToDo: type
+async function verifyJwt(token: string, pem: any, options: any): Promise<JwtPayload | Error> {
+  // ToDo: type
   return new Promise((resolve, reject) => {
     JsonWebToken.verify(token, pem, options, (err, decoded) => {
       if (err) {
@@ -221,7 +225,7 @@ async function verifyJwt(token: string, pem: any, options: any): Promise<JwtPayl
       } else {
         resolve(decoded as JwtPayload);
       }
-    })
+    });
   });
 }
 
@@ -234,18 +238,14 @@ function getCookieValue(headers: CloudFrontHeaders, cookieName: string): string 
   return cookies[cookieName];
 }
 
-
 // --------------------
 // id token
 // --------------------
 class IdToken {
-  constructor(
-    public readonly raw: string,
-    public readonly decoded: any,
-  ) {
-  }
+  constructor(public readonly raw: string, public readonly decoded: any) {}
 
-  static async get(endPoint: string, tokenRequest: any) { // ToDo: type
+  static async get(endPoint: string, tokenRequest: any) {
+    // ToDo: type
     const tokenResponse = await Axios.post(endPoint, QueryString.stringify(tokenRequest));
     const idToken = tokenResponse.data.id_token;
     const decoded = JsonWebToken.decode(idToken, { complete: true });
