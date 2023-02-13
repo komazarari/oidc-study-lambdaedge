@@ -67,8 +67,7 @@ async function handleCallback(
   const config = global.config;
 
   if (queryString.error) {
-    const e = typeof queryString.error === 'string' ? queryString.error : queryString.error.toString();
-    return { authenticated: false, response: unauthorizedResponse(e, '', '') };
+    return { authenticated: false, response: unauthorizedResponse(queryString.error.toString(), '', '') };
   }
   if (!queryString.code) {
     return { authenticated: false, response: unauthorizedResponse('No Code Found', '', '') };
