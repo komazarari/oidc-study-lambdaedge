@@ -1,15 +1,22 @@
 import { CloudFrontRequest, CloudFrontRequestResult, CloudFrontHeaders, CloudFrontResultResponse } from 'aws-lambda';
+
+import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest } from './config';
 import Axios from 'axios';
 import Cookie from 'cookie';
 import JsonWebToken, { JwtPayload } from 'jsonwebtoken';
 import JwkToPem from 'jwk-to-pem';
 import QueryString, { ParsedUrlQuery } from 'querystring';
-import { assert } from 'console';
+import assert from 'assert';
 
 
 export interface AuthenticationResult {
   authenticated: boolean;
   response: CloudFrontRequestResult;
+}
+
+const global = {
+  isDevelop: process.env.IS_DEVELOP as string | undefined,
+  config: null as Config | null,
 }
 
 export async function authenticate(request: CloudFrontRequest): Promise<AuthenticationResult> {
@@ -23,10 +30,11 @@ export async function authenticate(request: CloudFrontRequest): Promise<Authenti
 }
 
 async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult> {
+  assert(global.config !== null);
   const { headers, querystring } = request;
   const queryString = QueryString.parse(querystring);
 
-  if (request.uri.startsWith('/_callback')) {
+  if (request.uri.startsWith(global.config.CALLBACK_PATH)) {
     return handleCallback(request, queryString);
   }
 
@@ -35,7 +43,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
     return { authenticated: false, response: oidcRedirectResponse(request) };
   }
 
-  const [verifyOk, err] = await verifyToken(authTokenCookieValue);
+  const [err, verifyOk] = await verifyToken(authTokenCookieValue);
   if (err) {
     switch (err.name) {
       default:
@@ -49,17 +57,19 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 }
 
 async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
+  assert(global.config !== null);
+  const config = global.config;
   try {
     const tokenRequest = {
-      client_id: process.env.CLIENT_ID, // Todo
-      client_secret: process.env.CLIENT_SECRET, // Todo
-      grant_type: 'authorization_code',
-      redirect_uri: 'http://localhost:3000/_callback',
+      client_id: config.client_id,
+      client_secret: config.client_secret,
+      grant_type: config.grant_type,
+      redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
       code: queryString.code,
     }
 
-    const idToken = await IdToken.get('https://oauth2.googleapis.com/token', tokenRequest);
-    const rawPem = tmpJwks.keys.find((key) => key.kid === idToken.decoded.header.kid);
+    const idToken = await IdToken.get('https://oauth2.googleapis.com/token', tokenRequest); // ToDo discovery document
+    const rawPem = tmpJwks.keys.find((key) => key.kid === idToken.decoded.header.kid); // ToDo jwks
     if (rawPem === undefined) {
       throw new Error('unable to find expected pem in JWKs keys');
     }
@@ -84,23 +94,33 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
           return { authenticated: false, response: internalServerErrorResponse() }; // ToDo
       }
     }
-
-
   } catch (err) {
     console.error(err);
     return { authenticated: false, response: internalServerErrorResponse() };
   }
 }
 
-async function verifyToken(authToken: string): Promise<[boolean, Error | null]> {
+async function verifyToken(authToken: string): Promise<[Error | null, boolean]> {
   console.log('ToDo: verifyToken');
-  return [true, null];
+  return [null, true];
 }
 
 // --------------------
 // global variables
 // --------------------
 async function prepareGlobals() {
+  await setConfig();
+}
+
+async function setConfig(): Promise<void> {
+  if (global.config) return;
+
+  if (global.isDevelop) {
+    global.config = fetchConfigFromFile();
+  } else {
+    global.config = await fetchConfigFromSecretsManager();
+  }
+  console.log('config fetched');
 }
 
 // --------------------
@@ -115,13 +135,15 @@ function internalServerErrorResponse(): CloudFrontRequestResult {
 }
 
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResult {
+  assert(global.config !== null);
+  const config = global.config;
   const authRequest = {
-    client_id: process.env.CLIENT_ID,
-    response_type: 'code',
-    scope: 'openid email',
-    redirect_uri: 'http://localhost:3000/_callback',
+    client_id: config.client_id,
+    response_type: config.response_type,
+    scope: config.scope,
+    redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
     state: request.uri
-  }
+  };
 
   const response = {
     status: '302',
@@ -130,8 +152,9 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResu
     headers: {
       location: [{
         key: 'Location',
-        value: `https://accounts.google.com/o/oauth2/v2/auth?${QueryString.stringify(authRequest)}`
+        value: `https://accounts.google.com/o/oauth2/v2/auth?${QueryString.stringify(authRequest)}` // ToDo discovery document
       }],
+      // ToDo set cookie TOKEN empty
     }
   };
   return response;
