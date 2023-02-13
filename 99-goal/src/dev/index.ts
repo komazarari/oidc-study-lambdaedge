@@ -18,6 +18,7 @@ async function authenticateMiddleware(req: Request, res: Response, next: NextFun
   const cfRequest = convertExpressRequestToCloudFrontRequest(req);
 
   const authResult = await authenticate(cfRequest);
+  //console.log('authResult:', JSON.stringify(authResult, null, 2))
   if (authResult.authenticated) {
     next();
   } else {
@@ -78,6 +79,8 @@ function sendResponseFromCloudFrontRequestResult(res: Response, cfRes: CloudFron
           if (parsedCookie[key]) {
             if (key === 'Expires') {
               options[keysMap[key]] = new Date(parsedCookie[key]);
+            } else if (key === 'Max-Age') {
+              options[keysMap[key]] = (Number(parsedCookie[key]) * 1000).toString();
             } else {
               options[keysMap[key]] = parsedCookie[key];
             }
