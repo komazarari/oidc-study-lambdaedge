@@ -2,6 +2,7 @@ import { CloudFrontRequest, CloudFrontRequestResult, CloudFrontHeaders, CloudFro
 
 import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest, TokenRequest } from './config';
 import Axios from 'axios';
+import Base64URL from 'base64url';
 import Cookie from 'cookie';
 import Crypto from 'crypto';
 import JsonWebToken, { JwtPayload } from 'jsonwebtoken';
@@ -82,6 +83,7 @@ async function handleCallback(
       grant_type: config.grant_type,
       redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
       code: queryString.code as string,
+      code_verifier: getCookieValue(headers, 'CODE_VERIFIER') as string,
     };
 
     const idToken = await IdToken.get(global.discoveryDocumnet.token_endpoint, tokenRequest);
@@ -202,6 +204,7 @@ function internalServerErrorResponse(): CloudFrontResultResponse {
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultResponse {
   assert(global.config !== null && global.discoveryDocumnet !== null);
   const { nonce, nonceHash } = generateNonceWithHash();
+  const pkce = new Pkce();
   const config = global.config;
   const authRequest: AuthRequest = {
     client_id: config.client_id,
@@ -210,6 +213,8 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultRespo
     redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
     state: request.uri,
     nonce: nonceHash,
+    code_challenge: pkce.codeChallenge,
+    code_challenge_method: pkce.getCodeChallengeMethod(),
   };
 
   const response = {
@@ -238,7 +243,13 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultRespo
             httpOnly: true,
           }),
         },
-        // ToDo code_verifier
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('CODE_VERIFIER', pkce.codeVerifier, {
+            path: '/',
+            httpOnly: true,
+          }),
+        },
       ],
     },
   };
@@ -362,7 +373,6 @@ function getCookieValue(headers: CloudFrontHeaders, cookieName: string): string 
 function generateNonceWithHash(): { nonce: string; nonceHash: string } {
   const nonce = Crypto.randomBytes(32).toString('hex');
   const nonceHash = hashFromNonce(nonce);
-  console.log('nonce', nonce, 'nonceHash', nonceHash);
   return { nonce, nonceHash };
 }
 
@@ -395,3 +405,21 @@ interface DiscoveryDocumentBase {
 }
 
 type DiscoveryDocument = DiscoveryDocumentBase & Record<string, unknown>;
+
+// --------------------
+// PKCE
+// --------------------
+class Pkce {
+  public readonly codeVerifier: string;
+  public readonly codeChallenge: string;
+
+  constructor(size = 43) {
+    this.codeVerifier = Crypto.randomBytes(size).toString('hex').slice(0, size);
+    const hash = Crypto.createHash('sha256').update(this.codeVerifier).digest();
+    this.codeChallenge = Base64URL.encode(hash);
+  }
+
+  getCodeChallengeMethod(): 'S256' {
+    return 'S256';
+  }
+}
