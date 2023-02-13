@@ -1,6 +1,6 @@
 import { CloudFrontRequest, CloudFrontRequestResult, CloudFrontHeaders, CloudFrontResultResponse } from 'aws-lambda';
 
-import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest } from './config';
+import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest, TokenRequest } from './config';
 import Axios from 'axios';
 import Cookie from 'cookie';
 import JsonWebToken, { JwtPayload } from 'jsonwebtoken';
@@ -63,12 +63,12 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
   assert(global.config !== null && global.discoveryDocumnet !== null && global.jwks.keys !== null);
   const config = global.config;
   try {
-    const tokenRequest = {
+    const tokenRequest: TokenRequest = {
       client_id: config.client_id,
       client_secret: config.client_secret,
       grant_type: config.grant_type,
       redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
-      code: queryString.code,
+      code: queryString.code as string,
     };
 
     const idToken = await IdToken.get(global.discoveryDocumnet.token_endpoint, tokenRequest);
@@ -158,7 +158,7 @@ function internalServerErrorResponse(): CloudFrontRequestResult {
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResult {
   assert(global.config !== null && global.discoveryDocumnet !== null);
   const config = global.config;
-  const authRequest = {
+  const authRequest: AuthRequest = {
     client_id: config.client_id,
     response_type: config.response_type,
     scope: config.scope,
