@@ -90,21 +90,23 @@ async function handleCallback(
       throw new Error('unable to find expected pem in JWKs keys');
     }
     const pem = jwkToBuffer(rawPem);
-    try {
-      const decoded = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
-      // ToDo validate NONCE
-      // if (!valid) return { authenticated: false, response: unauthorizedResponce('Invalid NONCE', 'Nonce is not valid', '') };
-      return { authenticated: false, response: originalPathRedirectResponse(queryString, idToken.decoded, headers) };
-    } catch (err: unknown) {
-      if (!err || !(err instanceof Error) || err.name === undefined) {
+
+    const verifyResult = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
+    if (verifyResult instanceof Error) {
+      const e = verifyResult;
+      if (!e.name) {
         console.error('verifyJwt failed with unknown error');
         return {
           authenticated: false,
           response: unauthorizedResponse('Unknown JWT', `User ${idToken.decoded.payload.email || 'unknown'}`, ''),
         };
       }
-      return jwtErrorResult(err, request);
+      return jwtErrorResult(e, request);
     }
+
+    // ToDo validate NONCE
+    // if (!valid) return { authenticated: false, response: unauthorizedResponce('Invalid NONCE', 'Nonce is not valid', '') };
+    return { authenticated: false, response: originalPathRedirectResponse(queryString, idToken.decoded, headers) };
   } catch (err) {
     console.error(err);
     return { authenticated: false, response: internalServerErrorResponse() };
