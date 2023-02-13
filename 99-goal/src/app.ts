@@ -3,6 +3,7 @@ import { CloudFrontRequest, CloudFrontRequestResult, CloudFrontHeaders, CloudFro
 import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest, TokenRequest } from './config';
 import Axios from 'axios';
 import Cookie from 'cookie';
+import Crypto from 'crypto';
 import JsonWebToken, { JwtPayload } from 'jsonwebtoken';
 import jwkToBuffer, { JWK } from 'jwk-to-pem';
 import QueryString, { ParsedUrlQuery } from 'querystring';
@@ -89,8 +90,10 @@ async function handleCallback(
       throw new Error('unable to find expected pem in JWKs keys');
     }
     const pem = jwkToBuffer(rawPem);
-
-    const verifyResult = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
+    const verifyResult = await verifyJwt(idToken.raw, pem, {
+      algorithms: ['RS256'],
+      nonce: hashFromNonce(getCookieValue(headers, 'NONCE') as string),
+    });
     if (verifyResult instanceof Error) {
       const e = verifyResult;
       if (!e.name) {
@@ -102,10 +105,8 @@ async function handleCallback(
       }
       return jwtErrorResult(e, request);
     }
-
-    // ToDo validate NONCE
-    // if (!valid) return { authenticated: false, response: unauthorizedResponce('Invalid NONCE', 'Nonce is not valid', '') };
-    return { authenticated: false, response: originalPathRedirectResponse(queryString, idToken.decoded, headers) };
+    const idTokenPayload = verifyResult;
+    return { authenticated: false, response: originalPathRedirectResponse(queryString, idTokenPayload.email, headers) };
   } catch (err) {
     console.error(err);
     return { authenticated: false, response: internalServerErrorResponse() };
@@ -200,6 +201,7 @@ function internalServerErrorResponse(): CloudFrontResultResponse {
 
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultResponse {
   assert(global.config !== null && global.discoveryDocumnet !== null);
+  const { nonce, nonceHash } = generateNonceWithHash();
   const config = global.config;
   const authRequest: AuthRequest = {
     client_id: config.client_id,
@@ -207,6 +209,7 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultRespo
     scope: config.scope,
     redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
     state: request.uri,
+    nonce: nonceHash,
   };
 
   const response = {
@@ -228,7 +231,14 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontResultRespo
             expires: new Date(1970, 1, 1, 0, 0, 0, 0),
           }),
         },
-        // ToDo NONCE
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('NONCE', nonce, {
+            path: '/',
+            httpOnly: true,
+          }),
+        },
+        // ToDo code_verifier
       ],
     },
   };
@@ -269,6 +279,13 @@ function originalPathRedirectResponse(
               maxAge: 60,
             },
           ),
+        },
+        {
+          key: 'Set-Cookie',
+          value: Cookie.serialize('NONCE', '', {
+            path: '/',
+            expires: new Date(1970, 1, 1, 0, 0, 0, 0),
+          }),
         },
       ],
     },
@@ -340,6 +357,17 @@ function getCookieValue(headers: CloudFrontHeaders, cookieName: string): string 
   }
   const cookies = Cookie.parse(cookieHeader[0].value);
   return cookies[cookieName];
+}
+
+function generateNonceWithHash(): { nonce: string; nonceHash: string } {
+  const nonce = Crypto.randomBytes(32).toString('hex');
+  const nonceHash = hashFromNonce(nonce);
+  console.log('nonce', nonce, 'nonceHash', nonceHash);
+  return { nonce, nonceHash };
+}
+
+function hashFromNonce(nonce: string): string {
+  return Crypto.createHmac('sha256', nonce).digest('hex');
 }
 
 // --------------------
