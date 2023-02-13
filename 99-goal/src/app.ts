@@ -17,6 +17,7 @@ export interface AuthenticationResult {
 const global = {
   isDevelop: process.env.IS_DEVELOP as string | undefined,
   config: null as Config | null,
+  discoveryDocumnet: null as DiscoveryDocument | null,
 }
 
 export async function authenticate(request: CloudFrontRequest): Promise<AuthenticationResult> {
@@ -57,7 +58,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 }
 
 async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
-  assert(global.config !== null);
+  assert(global.config !== null && global.discoveryDocumnet !== null);
   const config = global.config;
   try {
     const tokenRequest = {
@@ -68,7 +69,7 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
       code: queryString.code,
     }
 
-    const idToken = await IdToken.get('https://oauth2.googleapis.com/token', tokenRequest); // ToDo discovery document
+    const idToken = await IdToken.get(global.discoveryDocumnet.token_endpoint, tokenRequest);
     const rawPem = tmpJwks.keys.find((key) => key.kid === idToken.decoded.header.kid); // ToDo jwks
     if (rawPem === undefined) {
       throw new Error('unable to find expected pem in JWKs keys');
@@ -110,10 +111,11 @@ async function verifyToken(authToken: string): Promise<[Error | null, boolean]> 
 // --------------------
 async function prepareGlobals() {
   await setConfig();
+  await setDiscoveryDocument();
 }
 
 async function setConfig(): Promise<void> {
-  if (global.config) return;
+  if (global.config !== null) return;
 
   if (global.isDevelop) {
     global.config = fetchConfigFromFile();
@@ -121,6 +123,13 @@ async function setConfig(): Promise<void> {
     global.config = await fetchConfigFromSecretsManager();
   }
   console.log('config fetched');
+}
+
+async function setDiscoveryDocument(): Promise<void> {
+  if (global.discoveryDocumnet !== null) return;
+  const config = global.config as Config;
+  global.discoveryDocumnet = (await Axios.get(config.DISCOVERY_DOCUMENT_URL)).data as DiscoveryDocument;
+  console.log('discovery document fetched');
 }
 
 // --------------------
@@ -135,7 +144,7 @@ function internalServerErrorResponse(): CloudFrontRequestResult {
 }
 
 function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResult {
-  assert(global.config !== null);
+  assert(global.config !== null && global.discoveryDocumnet !== null);
   const config = global.config;
   const authRequest = {
     client_id: config.client_id,
@@ -152,7 +161,7 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResu
     headers: {
       location: [{
         key: 'Location',
-        value: `https://accounts.google.com/o/oauth2/v2/auth?${QueryString.stringify(authRequest)}` // ToDo discovery document
+        value: `${global.discoveryDocumnet.authorization_endpoint}?${QueryString.stringify(authRequest)}`,
       }],
       // ToDo set cookie TOKEN empty
     }
@@ -231,6 +240,17 @@ class IdToken {
     return new IdToken(idToken, decoded);
   }
 }
+
+// --------------------
+// discovery document
+// --------------------
+interface DiscoveryDocumentBase {
+  authorization_endpoint: string;
+  token_endpoint: string;
+  jwks_uri: string;
+}
+
+type DiscoveryDocument = DiscoveryDocumentBase & Record<string, unknown>;
 
 // --------------------
 // tmp
