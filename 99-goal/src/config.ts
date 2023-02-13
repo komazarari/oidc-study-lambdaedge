@@ -6,28 +6,28 @@ const secretsManagerClient = new SecretsManagerClient({ region: 'us-east-1' });
 import fs from 'fs';
 
 export interface AuthRequest {
-  [key: string]: {
-    client_id: string;
-    response_type: string;
-    redirect_uri: string;
+  [key: string]: string | undefined
 
-    state?: string;
-    nonce?: string;
-    code_challenge?: string;
-    code_challenge_method?: 'S256';
-  };
+  client_id: string;
+  response_type: string;
+  redirect_uri: string;
+
+  state?: string;
+  nonce?: string;
+  code_challenge?: string;
+  code_challenge_method?: 'S256';
 }
 
 export interface TokenRequest {
-  [key: string]: {
-    client_id: string;
-    client_secret: string;
-    redirect_uri: string;
-    grant_type: string;
-    code: string;
+  [key: string]: string | undefined
 
-    code_verifier?: string;
-  };
+  client_id: string;
+  client_secret: string;
+  redirect_uri: string;
+  grant_type: string;
+  code: string;
+
+  code_verifier?: string;
 }
 
 export interface Config {
