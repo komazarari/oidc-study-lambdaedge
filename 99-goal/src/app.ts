@@ -13,13 +13,15 @@ export interface AuthenticationResult {
   response: CloudFrontRequestResult;
 }
 
+type JWKs = {
+  keys: ({ kid: string } & JWK)[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+};
+
 const global = {
   isDevelop: process.env.IS_DEVELOP as string | undefined,
   config: null as Config | null,
   discoveryDocumnet: null as DiscoveryDocument | null,
-  jwks: {
-    keys: null as ({ kid: string } & JWK)[] | null,
-  },
+  jwks: null as JWKs | null,
 };
 
 export async function authenticate(request: CloudFrontRequest): Promise<AuthenticationResult> {
@@ -56,7 +58,9 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 }
 
 async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
-  assert(global.config !== null && global.discoveryDocumnet !== null && global.jwks.keys !== null);
+  assert(global.config !== null);
+  assert(global.discoveryDocumnet !== null);
+  assert(global.jwks !== null);
   const config = global.config;
 
   if (queryString.error) {
