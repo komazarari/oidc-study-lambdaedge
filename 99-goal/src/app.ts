@@ -4,10 +4,9 @@ import { Config, fetchConfigFromSecretsManager, fetchConfigFromFile, AuthRequest
 import Axios from 'axios';
 import Cookie from 'cookie';
 import JsonWebToken, { JwtPayload } from 'jsonwebtoken';
-import JwkToPem from 'jwk-to-pem';
+import jwkToBuffer, { JWK } from 'jwk-to-pem';
 import QueryString, { ParsedUrlQuery } from 'querystring';
 import assert from 'assert';
-
 
 export interface AuthenticationResult {
   authenticated: boolean;
@@ -18,7 +17,10 @@ const global = {
   isDevelop: process.env.IS_DEVELOP as string | undefined,
   config: null as Config | null,
   discoveryDocumnet: null as DiscoveryDocument | null,
-}
+  jwks: {
+    keys: null as (({ kid: string } & JWK)[]) | null,
+  },
+};
 
 export async function authenticate(request: CloudFrontRequest): Promise<AuthenticationResult> {
   try {
@@ -58,7 +60,7 @@ async function doAuth(request: CloudFrontRequest): Promise<AuthenticationResult>
 }
 
 async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrlQuery): Promise<AuthenticationResult> {
-  assert(global.config !== null && global.discoveryDocumnet !== null);
+  assert(global.config !== null && global.discoveryDocumnet !== null && global.jwks.keys !== null);
   const config = global.config;
   try {
     const tokenRequest = {
@@ -67,16 +69,16 @@ async function handleCallback(request: CloudFrontRequest, queryString: ParsedUrl
       grant_type: config.grant_type,
       redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
       code: queryString.code,
-    }
+    };
 
     const idToken = await IdToken.get(global.discoveryDocumnet.token_endpoint, tokenRequest);
-    const rawPem = tmpJwks.keys.find((key) => key.kid === idToken.decoded.header.kid); // ToDo jwks
+    const rawPem = global.jwks.keys.find((key) => key.kid === idToken.decoded.header.kid);
     if (rawPem === undefined) {
       throw new Error('unable to find expected pem in JWKs keys');
     }
-    const pem = JwkToPem(rawPem);
+    const pem = jwkToBuffer(rawPem);
     try {
-      const decoded = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] })
+      const decoded = await verifyJwt(idToken.raw, pem, { algorithms: ['RS256'] });
       // ToDo validate NONCE
       return { authenticated: false, response: originalPathRedirectResponse(request, queryString) };
     } catch (err: unknown) {
@@ -112,6 +114,7 @@ async function verifyToken(authToken: string): Promise<[Error | null, boolean]> 
 async function prepareGlobals() {
   await setConfig();
   await setDiscoveryDocument();
+  await setJwks();
 }
 
 async function setConfig(): Promise<void> {
@@ -127,9 +130,18 @@ async function setConfig(): Promise<void> {
 
 async function setDiscoveryDocument(): Promise<void> {
   if (global.discoveryDocumnet !== null) return;
-  const config = global.config as Config;
+  assert(global.config !== null);
+  const config = global.config;
   global.discoveryDocumnet = (await Axios.get(config.DISCOVERY_DOCUMENT_URL)).data as DiscoveryDocument;
   console.log('discovery document fetched');
+}
+
+async function setJwks(): Promise<void> {
+  if (global.jwks !== null) return;
+  assert(global.discoveryDocumnet !== null);
+  // ts-ignore
+  global.jwks = (await Axios.get(global.discoveryDocumnet.jwks_uri)).data;
+  console.log('jwks fetched', global.jwks);
 }
 
 // --------------------
@@ -151,7 +163,7 @@ function oidcRedirectResponse(request: CloudFrontRequest): CloudFrontRequestResu
     response_type: config.response_type,
     scope: config.scope,
     redirect_uri: `${config.CALLBACK_BASE_URL}${config.CALLBACK_PATH}`,
-    state: request.uri
+    state: request.uri,
   };
 
   const response = {
@@ -251,43 +263,3 @@ interface DiscoveryDocumentBase {
 }
 
 type DiscoveryDocument = DiscoveryDocumentBase & Record<string, unknown>;
-
-// --------------------
-// tmp
-// --------------------
-function dummyAuthenticate(_request: CloudFrontRequest): AuthenticationResult {
-  if (Math.random() >= 0.5) {
-    return { authenticated: true, response: null };
-  } else {
-    return {
-      authenticated: false,
-      response: {
-        status: '401',
-        statusDescription: 'Unauthorized',
-        body: 'Unauthorized',
-      },
-    };
-  }
-}
-
-// https://www.googleapis.com/oauth2/v3/certs
-const tmpJwks = {
-  "keys": [
-    {
-      "kid": "b49c5062d890f5ce449e890c88e8dd98c4fee0ab",
-      "n": "zSkYGlwDMKd7TWEuog27TdT04nLqocBhSKc6XpEfojywqKTACMtwzA3jtSC0pCTtf2a6VVOPZdMEmWYA32aqymUWmxCwLK12_R_s4WE8aRjzPzm9dx1P-3JA2286EF39jSq1btIhZbx_Q791heUFbsCMf1B9l3GODjMXFx4Hopuu7SnUffDGehdMQrphd2kNmzOfJ7DxTTwmtYwqnBjFwCI8vYRf72aNwAZ4xwwb7j4dUUCz19_EAa4TyqbGvSy4L1-kix6wTtXIwnUGH_dxFFCqa7WATsQ-KXBaFkXh7Px69M1KabItapQibNWQhMyeKxfRVNEih0C3NYLN6ZGkWQ",
-      "use": "sig",
-      "e": "AQAB",
-      "alg": "RS256",
-      "kty": "RSA" as 'RSA'
-    },
-    {
-      "e": "AQAB",
-      "kid": "5962e7a059c7f5c0c0d56cbad51fe64ceeca67c6",
-      "n": "lHW8Q4I2Qcz1PdtkiCBeeoZHTdjrw8c9sqGODztqaEvggSBl-wcBnLisXIulEkwtCvEwdx4VW4173yi5LLFc47Z1J6-1z9O0xaja7FQNG5xkSYtjOxJyPY7sqDnt9mcoMZEcBf_XB0Uc6Vp-JyQHKM3t1LjK_IrlzruU8UCLw6T654uQfEap9xtV8xuWhlPOdq8psqGTD1rev0ZIqXWVaBlsJ9f7M9k_pSA6YmujjxzzlZ4ASP97yNzudu8vSHdT_BL0aEc81-SgtJbw6IAAzcOoA-e6oFQuzoMJ0FhbgJ5H5A9aUtMHX9qXXVIRefzy3bkGtxTvwuJt3FyesHpxzQ",
-      "use": "sig",
-      "kty": "RSA" as 'RSA',
-      "alg": "RS256"
-    }
-  ]
-}
