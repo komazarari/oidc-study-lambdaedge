@@ -1,6 +1,6 @@
-LOCAL_CONFIG.json
+LOCAL_CONFIG*.json*
 SM_CONFIG_KEY.json
-
+samconfig.toml
 
 # Created by https://www.toptal.com/developers/gitignore/api/osx,node,linux,windows,sam
 # Edit at https://www.toptal.com/developers/gitignore?templates=osx,node,linux,windows,sam
