@@ -1,4 +1,4 @@
-LOCAL_CONFIG*.json*
+*CONFIG*.json*
 SM_CONFIG_KEY.json
 samconfig.toml
 
